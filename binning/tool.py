@@ -54,7 +54,32 @@ class Tool:
 
         return [convert_lst[i * slice_size:(i + 1) * slice_size] for i in range(0, ceil(len(convert_lst) / slice_size))]
 
-    def convert_bins_dict(self, features_dict: Dict[str, Any],
+    @staticmethod
+    def decrypt_features_dict(feature_dict, features, priv):
+        """对特征字典进行解密
+
+        :param feature_dict: 特征字典
+        :param features: 全部特征
+        :param priv: 密钥
+        :return: 解密后的特征字典
+        """
+        feature_dict_de = {}
+        for x in features:
+            if feature_dict[x].get('success') == 0:
+                feature_dict_de[x] = feature_dict[x]
+                continue
+            try:
+                df_tmp2 = feature_dict[x].get('result')
+                df_tmp = df_tmp2.copy()
+                df_tmp['val_1'] = df_tmp2['val_1'].apply(lambda x: decrypting(x, priv))
+                feature_dict_de[x] = {'success': 1, 'msg': '', 'result': df_tmp}
+            except Exception as ex:
+                feature_dict_de[x] = {'success': 0, 'msg': f'该特征字段值解密失败，{repr(ex)}'}
+
+        return feature_dict_de
+
+    @staticmethod
+    def convert_bins_dict(features_dict: Dict[str, Any],
                           result_dict: Dict[str, Any]) -> Dict[str, Any]:
         """根据result dict转换成bins dict
 
@@ -72,54 +97,16 @@ class Tool:
             df = data.get("result")
             df.reset_index(inplace=True)
             if distribution == Distribution.CONTINUOUS.value:
-                self._get_con_bins_lst(bins_lst, df["x_cat"])
+                _get_con_bins_lst(bins_lst, df["x_cat"])
             else:
                 for _, value in df["x_cat"].items():
-                    self.__update_list_drop_duplicate(bins_lst, value)
+                    _update_list_drop_duplicate(bins_lst, value)
             bins_dict[feature] = bins_lst
 
         return bins_dict
 
-    def _get_con_bins_lst(self, bins_lst: List[Any],
-                          interval_ser: pd.Series) -> None:
-        """获取连续特征的分箱列表
-
-        Args:
-            bins_lst (List[Any]): 分箱列表
-            interval_ser (pd.Series): 区间series
-        """
-        has_nan = False
-        if "NaN" in interval_ser.values:
-            has_nan = True
-
-        num = len(interval_ser.index)
-        for idx, interval in interval_ser.items():
-            if idx == 0 and num != 1:
-                self.__update_list_drop_duplicate(bins_lst, -np.inf)
-                self.__update_list_drop_duplicate(bins_lst, interval.right)
-            elif (has_nan and idx == num - 2 and num != 1) or ((not has_nan) and idx == num - 1 and num != 1):
-                self.__update_list_drop_duplicate(bins_lst, interval.left)
-                self.__update_list_drop_duplicate(bins_lst, np.inf)
-            else:
-                if interval == "NaN":
-                    self.__update_list_drop_duplicate(bins_lst, "NaN")
-                else:
-                    self.__update_list_drop_duplicate(bins_lst, interval.left)
-                    self.__update_list_drop_duplicate(bins_lst, interval.right)
-
     @staticmethod
-    def __update_list_drop_duplicate(lst: List[Any],
-                                     item: Any) -> None:
-        """更新列表不添加重复元素
-
-        Args:
-            lst (List[Any]): 列表
-            item (Any): 元素
-        """
-        if item not in lst:
-            lst.append(item)
-
-    def bins_merging(self, bin_type: str,
+    def bins_merging(bin_type: str,
                      features_dict: Dict[str, Any],
                      bin_result: Dict[str, Any],
                      con_min_sample: Any,
@@ -144,9 +131,9 @@ class Tool:
 
             df = bin_result[feature].get("result")
             if distribution == Distribution.CONTINUOUS.value:
-                df_tmp = self._group_con_merge_bin(df, bin_type, con_min_sample)
+                df_tmp = _group_con_merge_bin(df, bin_type, con_min_sample)
             else:
-                df_tmp = self._group_cat_merge_bin(df, bin_type, cat_min_sample)
+                df_tmp = _group_cat_merge_bin(df, bin_type, cat_min_sample)
                 df_tmp.reset_index(inplace=True)
 
             merge_result[feature] = {"success": success,
@@ -155,151 +142,196 @@ class Tool:
 
         return merge_result
 
-    def _group_con_merge_bin(self, df_tmp, bin_type, con_min_sample):
-        """连续特征分箱合并，如相类似的箱数进行合并
 
-        :param df_tmp: dataframe
-        :param bin_type: 分箱类型
-        :param con_min_sample: 连续特征最小样本量
-        :return: df
-        """
-        df_tmp_nan = None
-        df_tmp['val_0'] = df_tmp['num'] - df_tmp['val_1']
-        df_tmp.reset_index(inplace=True)
-        df_tmp['x_cat'] = df_tmp['x_cat'].astype('object')
-        is_nan = False
-        if df_tmp.loc[df_tmp.index.max(), 'x_cat'] == 'NaN':
-            is_nan = True
-            df_tmp_nan = df_tmp.loc[[df_tmp.index.max()]]
-            df_tmp.drop([df_tmp.index.max()], inplace=True)
+def _get_con_bins_lst(bins_lst: List[Any],
+                      interval_ser: pd.Series) -> None:
+    """获取连续特征的分箱列表
 
-        # 对于不合适的分组，将其合并到别的组
-        for i in df_tmp.index:
-            if len(df_tmp) == 1:
-                break
-            if bin_type == BinType.FREQUENCY_BIN.name:
+    Args:
+        bins_lst (List[Any]): 分箱列表
+        interval_ser (pd.Series): 区间series
+    """
+    has_nan = False
+    if "NaN" in interval_ser.values:
+        has_nan = True
+
+    num = len(interval_ser.index)
+    for idx, interval in interval_ser.items():
+        if idx == 0 and num != 1:
+            _update_list_drop_duplicate(bins_lst, -np.inf)
+            _update_list_drop_duplicate(bins_lst, interval.right)
+        elif (has_nan and idx == num - 2 and num != 1) or ((not has_nan) and idx == num - 1 and num != 1):
+            _update_list_drop_duplicate(bins_lst, interval.left)
+            _update_list_drop_duplicate(bins_lst, np.inf)
+        else:
+            if interval == "NaN":
+                _update_list_drop_duplicate(bins_lst, "NaN")
+            else:
+                _update_list_drop_duplicate(bins_lst, interval.left)
+                _update_list_drop_duplicate(bins_lst, interval.right)
+
+
+def _update_list_drop_duplicate(lst: List[Any],
+                                item: Any) -> None:
+    """更新列表不添加重复元素
+
+    Args:
+        lst (List[Any]): 列表
+        item (Any): 元素
+    """
+    if item not in lst:
+        lst.append(item)
+
+
+def _group_con_merge_bin(df_tmp, bin_type, con_min_sample):
+    """连续特征分箱合并，如相类似的箱数进行合并
+
+    :param df_tmp: dataframe
+    :param bin_type: 分箱类型
+    :param con_min_sample: 连续特征最小样本量
+    :return: df
+    """
+    df_tmp_nan = None
+    df_tmp['val_0'] = df_tmp['num'] - df_tmp['val_1']
+    df_tmp.reset_index(inplace=True)
+    df_tmp['x_cat'] = df_tmp['x_cat'].astype('object')
+    is_nan = False
+    if df_tmp.loc[df_tmp.index.max(), 'x_cat'] == 'NaN':
+        is_nan = True
+        df_tmp_nan = df_tmp.loc[[df_tmp.index.max()]]
+        df_tmp.drop([df_tmp.index.max()], inplace=True)
+
+    # 对于不合适的分组，将其合并到别的组
+    for i in df_tmp.index:
+        if len(df_tmp) == 1:
+            break
+        if bin_type == BinType.FREQUENCY_BIN.name:
+            judge = False
+        else:
+            if df_tmp.loc[i, 'num'] < con_min_sample:
+                judge = True
+            else:
                 judge = False
-            else:
-                if df_tmp.loc[i, 'num'] < con_min_sample:
-                    judge = True
-                else:
-                    judge = False
-            self._con_merge_bin(i, judge, df_tmp)
-        if is_nan:
-            df_tmp2 = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
-            return df_tmp2
+        _con_merge_bin(i, judge, df_tmp)
+    if is_nan:
+        df_tmp2 = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
+        return df_tmp2
 
+    return df_tmp
+
+
+def _con_merge_bin(idx, is_merge, df_tmp):
+    """连续特征合并分箱
+
+    :param idx: 索引
+    :param is_merge: 是否合并
+    :param df_tmp: 样本dataframe
+    """
+    if is_merge:
+        if idx == df_tmp.index.max():
+            pos = len(df_tmp) - 2
+            indx = df_tmp.index[pos]
+            df_tmp.loc[indx, 'val_0'] = df_tmp.loc[indx, 'val_0'] + df_tmp.loc[idx, 'val_0']
+            df_tmp.loc[indx, 'val_1'] = df_tmp.loc[indx, 'val_1'] + df_tmp.loc[idx, 'val_1']
+            df_tmp.loc[indx, 'num'] = df_tmp.loc[indx, 'num'] + df_tmp.loc[idx, 'num']
+            tmp_interval = pd.Interval(left=df_tmp.loc[indx, 'x_cat'].left, right=df_tmp.loc[idx, 'x_cat'].right)
+            df_tmp.loc[indx, 'x_cat'] = tmp_interval
+            df_tmp.drop([idx], axis=0, inplace=True)
+        else:
+            df_tmp.loc[idx + 1, 'val_0'] = df_tmp.loc[idx + 1, 'val_0'] + df_tmp.loc[idx, 'val_0']
+            df_tmp.loc[idx + 1, 'val_1'] = df_tmp.loc[idx + 1, 'val_1'] + df_tmp.loc[idx, 'val_1']
+            df_tmp.loc[idx + 1, 'num'] = df_tmp.loc[idx + 1, 'num'] + df_tmp.loc[idx, 'num']
+            tmp_interval = pd.Interval(left=df_tmp.loc[idx, 'x_cat'].left, right=df_tmp.loc[idx + 1, 'x_cat'].right)
+            df_tmp.loc[idx + 1, 'x_cat'] = tmp_interval
+            df_tmp.drop([idx], axis=0, inplace=True)
+
+
+def _group_cat_merge_bin(df_tmp, bin_type, cat_min_sample):
+    """离散特征分箱合并，如相类似的箱数进行合并
+
+    :param df_tmp: 数据源
+    :param bin_type: 分箱类型
+    :param cat_min_sample: 离散特征最小样本量
+    :return: df
+    """
+    df_tmp_nan = None
+    df_tmp['val_0'] = df_tmp['num'] - df_tmp['val_1']
+    if bin_type == BinType.ENUMERATE_BIN.name or bin_type == BinType.CUSTOM_BIN.name:
         return df_tmp
 
-    def _group_cat_merge_bin(self, df_tmp, bin_type, cat_min_sample):
-        """离散特征分箱合并，如相类似的箱数进行合并
+    df_tmp['odds'] = np.round(df_tmp['val_1'] / df_tmp['val_0'], 10)
+    df_tmp = df_tmp.reset_index()
+    df_tmp['x_cat'] = df_tmp['x_cat'].astype('object')
+    is_nan = False
+    for i in df_tmp.index:
+        if df_tmp.loc[i, 'x_cat'] == NAN_QUO:
+            is_nan = True
+            df_tmp_nan = df_tmp.loc[[i]]
+            df_tmp.drop([i], inplace=True)
+    df_tmp = df_tmp.reset_index(drop=True)
+    _cat_merge_bin(cat_min_sample, df_tmp)
+    if is_nan:
+        df_tmp_s = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
+        return df_tmp_s
 
-        :param df_tmp: 数据源
-        :param bin_type: 分箱类型
-        :param cat_min_sample: 离散特征最小样本量
-        :return: df
-        """
-        df_tmp_nan = None
-        df_tmp['val_0'] = df_tmp['num'] - df_tmp['val_1']
-        if bin_type == BinType.ENUMERATE_BIN.name or bin_type == BinType.CUSTOM_BIN.name:
-            return df_tmp
+    return df_tmp
 
-        df_tmp['odds'] = np.round(df_tmp['val_1'] / df_tmp['val_0'], 10)
-        df_tmp = df_tmp.reset_index()
-        df_tmp['x_cat'] = df_tmp['x_cat'].astype('object')
-        is_nan = False
+
+def _cat_merge_bin(cat_min_sample, df_tmp):
+    """离散特征合并分箱
+
+    :param cat_min_sample: 离散特征最小样本量
+    :param df_tmp: dataframe
+    """
+    judge_set = set()
+    while True:
+        if len(df_tmp) == 1 or len(set(judge_set)) == 1:
+            break
+        odds_list = list()
+        index = df_tmp.shape[0]
+        odds = None
+        judge_set.clear()
         for i in df_tmp.index:
-            if df_tmp.loc[i, 'x_cat'] == NAN_QUO:
-                is_nan = True
-                df_tmp_nan = df_tmp.loc[[i]]
-                df_tmp.drop([i], inplace=True)
-        df_tmp = df_tmp.reset_index(drop=True)
-        self._cat_merge_bin(cat_min_sample, df_tmp)
-        if is_nan:
-            df_tmp_s = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
-            return df_tmp_s
-
-        return df_tmp
-
-    def _con_merge_bin(self, idx, is_merge, df_tmp):
-        """连续特征合并分箱
-
-        :param idx: 索引
-        :param is_merge: 是否合并
-        :param df_tmp: 样本dataframe
-        """
-        if is_merge:
-            if idx == df_tmp.index.max():
-                pos = len(df_tmp) - 2
-                indx = df_tmp.index[pos]
-                df_tmp.loc[indx, 'val_0'] = df_tmp.loc[indx, 'val_0'] + df_tmp.loc[idx, 'val_0']
-                df_tmp.loc[indx, 'val_1'] = df_tmp.loc[indx, 'val_1'] + df_tmp.loc[idx, 'val_1']
-                df_tmp.loc[indx, 'num'] = df_tmp.loc[indx, 'num'] + df_tmp.loc[idx, 'num']
-                tmp_interval = pd.Interval(left=df_tmp.loc[indx, 'x_cat'].left, right=df_tmp.loc[idx, 'x_cat'].right)
-                df_tmp.loc[indx, 'x_cat'] = tmp_interval
-                df_tmp.drop([idx], axis=0, inplace=True)
+            if df_tmp.loc[i, 'num'] < cat_min_sample:
+                judge_set.add(True)
+                index = min(i, index)
+                odds = df_tmp.loc[index, 'odds']
+                odds_list.append(df_tmp.loc[i, 'odds'])
             else:
-                df_tmp.loc[idx + 1, 'val_0'] = df_tmp.loc[idx + 1, 'val_0'] + df_tmp.loc[idx, 'val_0']
-                df_tmp.loc[idx + 1, 'val_1'] = df_tmp.loc[idx + 1, 'val_1'] + df_tmp.loc[idx, 'val_1']
-                df_tmp.loc[idx + 1, 'num'] = df_tmp.loc[idx + 1, 'num'] + df_tmp.loc[idx, 'num']
-                tmp_interval = pd.Interval(left=df_tmp.loc[idx, 'x_cat'].left, right=df_tmp.loc[idx + 1, 'x_cat'].right)
-                df_tmp.loc[idx + 1, 'x_cat'] = tmp_interval
-                df_tmp.drop([idx], axis=0, inplace=True)
+                judge_set.add(False)
+                odds_list.append(df_tmp.loc[i, 'odds'])
 
-    def _cat_merge_bin(self, cat_min_sample, df_tmp):
-        """离散特征合并分箱
-
-        :param cat_min_sample: 离散特征最小样本量
-        :param df_tmp: dataframe
-        """
-        judge_set = set()
-        while True:
-            if len(df_tmp) == 1 or len(set(judge_set)) == 1:
-                break
-            odds_list = list()
-            index = df_tmp.shape[0]
-            odds = None
-            judge_set.clear()
-            for i in df_tmp.index:
-                if df_tmp.loc[i, 'num'] < cat_min_sample:
-                    judge_set.add(True)
-                    index = min(i, index)
-                    odds = df_tmp.loc[index, 'odds']
-                    odds_list.append(df_tmp.loc[i, 'odds'])
-                else:
-                    judge_set.add(False)
-                    odds_list.append(df_tmp.loc[i, 'odds'])
-
-            self._update_cat_df(judge_set, odds_list, index, odds, df_tmp)
-
-    def _update_cat_df(self, judge_set, odds_list, index, odds, df_tmp):
-        """更新离散特征的df
-
-        :param judge_set: set(True/False)
-        :param odds_list: [df['odds'], df['odds']]
-        :param index: 索引
-        :param odds: df['odds']
-        :param df_tmp: dataframe
-        """
-        odds_abs_json = {}
-        if len(judge_set) > 1:
-            for i, iodds in enumerate(odds_list):
-                if i != index:
-                    odds_abs_json[i] = np.round(abs(odds - iodds), 10)
-
-            min_index = min(odds_abs_json.keys(), key=(lambda k: odds_abs_json[k]))
-            df_tmp.loc[index, 'val_0'] = df_tmp.loc[index, 'val_0'] + df_tmp.loc[min_index, 'val_0']
-            df_tmp.loc[index, 'val_1'] = df_tmp.loc[index, 'val_1'] + df_tmp.loc[min_index, 'val_1']
-            df_tmp.loc[index, 'num'] = df_tmp.loc[index, 'num'] + df_tmp.loc[min_index, 'num']
-            tmp_interval = df_tmp.loc[index, 'x_cat'] + ',' + df_tmp.loc[min_index, 'x_cat']
-            df_tmp.loc[index, 'x_cat'] = tmp_interval
-            df_tmp.drop([min_index], axis=0, inplace=True)
-            df_tmp['odds'] = np.round(df_tmp['val_1'] / df_tmp['val_0'], 10)
-            df_tmp.reset_index(drop=True, inplace=True)
+        _update_cat_df(judge_set, odds_list, index, odds, df_tmp)
 
 
-def get_cat_enums_lst(x_enums: Dict[Any, Any],
-                      bins: List[Any]) -> List[Any]:
+def _update_cat_df(judge_set, odds_list, index, odds, df_tmp):
+    """更新离散特征的df
+
+    :param judge_set: set(True/False)
+    :param odds_list: [df['odds'], df['odds']]
+    :param index: 索引
+    :param odds: df['odds']
+    :param df_tmp: dataframe
+    """
+    odds_abs_json = {}
+    if len(judge_set) > 1:
+        for i, iodds in enumerate(odds_list):
+            if i != index:
+                odds_abs_json[i] = np.round(abs(odds - iodds), 10)
+
+        min_index = min(odds_abs_json.keys(), key=(lambda k: odds_abs_json[k]))
+        df_tmp.loc[index, 'val_0'] = df_tmp.loc[index, 'val_0'] + df_tmp.loc[min_index, 'val_0']
+        df_tmp.loc[index, 'val_1'] = df_tmp.loc[index, 'val_1'] + df_tmp.loc[min_index, 'val_1']
+        df_tmp.loc[index, 'num'] = df_tmp.loc[index, 'num'] + df_tmp.loc[min_index, 'num']
+        tmp_interval = df_tmp.loc[index, 'x_cat'] + ',' + df_tmp.loc[min_index, 'x_cat']
+        df_tmp.loc[index, 'x_cat'] = tmp_interval
+        df_tmp.drop([min_index], axis=0, inplace=True)
+        df_tmp['odds'] = np.round(df_tmp['val_1'] / df_tmp['val_0'], 10)
+        df_tmp.reset_index(drop=True, inplace=True)
+
+
+def _get_cat_enums_lst(x_enums: Dict[Any, Any],
+                       bins: List[Any]) -> List[Any]:
     """离散特征，把不在bins中而在x_enums中的key加入到bins中
 
     Args:
@@ -320,9 +352,9 @@ def get_cat_enums_lst(x_enums: Dict[Any, Any],
     return bins
 
 
-def merge_categorical(feature: str,
-                      cat_enums_lst: List[Any],
-                      df: pd.DataFrame) -> pd.DataFrame:
+def _merge_categorical(feature: str,
+                       cat_enums_lst: List[Any],
+                       df: pd.DataFrame) -> pd.DataFrame:
     """离散特征数据映射，把特征feature的信息(cat_enums_lst)更新到df
 
     Args:
@@ -390,8 +422,8 @@ def get_cat_feature_bin(df: pd.DataFrame,
         df[feature] = df[feature].astype("object")  # 离散类型转换object
         df[feature].fillna("NaN", inplace=True)
         x_enums = json.loads(df[feature].value_counts().to_json())
-        cat_enums_lst = get_cat_enums_lst(x_enums, cat_param)
-        df_tmp = merge_categorical(feature, cat_enums_lst, df)
+        cat_enums_lst = _get_cat_enums_lst(x_enums, cat_param)
+        df_tmp = _merge_categorical(feature, cat_enums_lst, df)
         df_tmp["x_cat"] = df_tmp[feature]
         df_tmp["x_cat"] = df_tmp["x_cat"].astype("object")
         df_tmp["x_cat"].fillna(NAN_QUO, inplace=True)
@@ -399,3 +431,22 @@ def get_cat_feature_bin(df: pd.DataFrame,
         return {"success": 1, "msg": "", "result": result}
     except Exception as ex:
         return {"success": 0, "msg": f"该离散特征自定义分箱计算失败,{repr(ex)}"}
+
+
+def decrypting(val: Any,
+               priv: Any) -> int:
+    """解密
+
+    Args:
+        val (Any): 待解密的value
+        priv (Any): 私钥
+
+    Returns:
+        int: 解密后的值
+    """
+    try:
+        de_val = priv.decrypt(val)
+    except Exception:
+        return 0
+    else:
+        return np.round(de_val, 0)

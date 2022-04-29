@@ -4,12 +4,11 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
-
 from fmpc.utils.LogUtils import get_fmpc_logger
+from joblib import Parallel, delayed
 from wares.common.binning.constants import LOG_PREFIX, MIN_BINS
-from wares.common.binning.enums import Distribution
-from wares.common.binning.tool import (Tool, get_cat_feature_bin,
+from wares.common.binning.enums import BinType, Distribution
+from wares.common.binning.tool import (Tool, decrypting, get_cat_feature_bin,
                                        get_con_feature_bin)
 from wares.common.binning.wrap_utils import exec_except, exec_log, exec_time
 
@@ -35,7 +34,6 @@ class ChimergeBin:
                             "job_id": self.job_id,
                             "ctx": self.ctx,
                             "curr_nid": self.curr_nid}
-        bin_result (Any): 分箱结果
         tool (Any): 工具类
     """
 
@@ -55,29 +53,16 @@ class ChimergeBin:
         self.parallel_info = None
         self.guest_nid = None
         self.data_transfer = None
-        self.bin_result = None
 
         self.tool = Tool()
-
         self.preprocess(kwargs)
 
     @exec_time
     @exec_except
     def preprocess(self, kwargs):
         """preprocess"""
-        self._check(kwargs)
         self._validate()
         self._parse_params(kwargs)
-
-    def _check(self, kwargs):
-        """check"""
-        if kwargs.get("role") != "GUEST" and kwargs.get("role") != "HOST":
-            raise ValueError(f"参数role为GUEST或者HOST，请检查")
-        if kwargs.get("role") == "HOST":
-            if not kwargs.get("guest_nid"):
-                raise ValueError(f"参数guest_nid为空，请检查")
-            if not kwargs.get("data_transfer"):
-                raise ValueError(f"参数data_transfer为空，请检查")
 
     def _validate(self):
         """validate"""
@@ -113,24 +98,28 @@ class ChimergeBin:
 
     def __convert_hex_features_dict(self):
         """hex features"""
-        hex_features_dict_ = {}
+        hex_features_dict = {}
         for feature, distribution in self.features_dict.items():
             hex_feature = feature.encode("utf-8").hex()
             feature_chi2_dict = {"feature": feature, "distribution": distribution, "chi2_params": {}, "chi2_values": {}}
             if distribution == Distribution.CONTINUOUS.value:
                 feature_chi2_dict["chi2_params"] = self.con_params
-                hex_features_dict_[hex_feature] = feature_chi2_dict
+                hex_features_dict[hex_feature] = feature_chi2_dict
             else:
                 feature_chi2_dict["chi2_params"] = self.cat_params
-                hex_features_dict_[hex_feature] = feature_chi2_dict
+                hex_features_dict[hex_feature] = feature_chi2_dict
 
-        return hex_features_dict_
+        return hex_features_dict
 
     @exec_log("卡方分箱计算")
     def bin_process(self, log: Callable = None) -> Dict[str, Any]:
         """卡方分箱计算
 
-        :return: {feature:list, feature2:list}
+        Args:
+            log (Callable, optional): 日志
+
+        Returns:
+            Dict[str, Any]: {"feature": {"success": 1, "msg": "", "result": group_result}...}
         """
         logger.info(f"{LOG_PREFIX}(guest)卡方分箱开始，发送features_a:{self.hex_features_dict}")
 
@@ -148,8 +137,8 @@ class ChimergeBin:
                 feature_info["chi2_values"]["ser_chi2"] = ser_chi2_categorical
                 sep_vals[feature] = self._get_y_sep_val(feature_info, log)
 
-        features_dict_ = self._feature_grouping(sep_vals)
-        return features_dict_
+        features_dict = self._get_feature_dict(sep_vals)
+        return features_dict
 
     def _get_y_sep_val(self, feature_info, log):
         """获取y方卡方信息sep_vals
@@ -402,8 +391,8 @@ class ChimergeBin:
         log(f"{LOG_PREFIX}HOST方，完成卡方分箱，共迭代{iter_}次")
         sep_vals = self._get_sep_vals(features_info)
 
-        features_dict_ = self._feature_grouping(sep_vals)
-        return features_dict_
+        features_dict = self._get_feature_dict(sep_vals)
+        return features_dict
 
     def _get_sep_vals(self, features_info):
         """获取卡方分箱值sep_vals
@@ -554,25 +543,25 @@ class ChimergeBin:
             features_group_dict.update(group_dict)
         return (features_info, features_group_dict)
 
-    def _feature_grouping(self, sep_vals: Dict[str, Any]) -> Dict[str, Any]:
-        """特征分组
+    def _get_feature_dict(self, sep_vals: Dict[str, Any]) -> Dict[str, Any]:
+        """分组，获取特征字典
 
         Args:
-            sep_vals (Dict[str, Any]): 特征分箱值，{"feature": Any}
+            sep_vals (Dict[str, Any]): 特征计算后的分箱参数值，{"feature": Any}
 
         Returns:
             Dict[str, Any]: 分箱结果，{"feature": {"success": 1, "msg": "", "result": group_result}...}
         """
-        feature_dict_ = {}
+        feature_dict = {}
         for feature, distribution in self.features_dict.items():
-            df_ = self.df.loc[:, [feature, self.label]]
+            df = self.df.loc[:, [feature, self.label]]
             param = sep_vals[feature]
             if distribution == Distribution.CONTINUOUS.value:
-                feature_dict_[feature] = get_con_feature_bin(df_, self.label, feature, param)
+                feature_dict[feature] = get_con_feature_bin(df, self.label, feature, param)
             else:
-                feature_dict_[feature] = get_cat_feature_bin(df_, self.label, feature, param)
+                feature_dict[feature] = get_cat_feature_bin(df, self.label, feature, param)
 
-        return feature_dict_
+        return feature_dict
 
     @staticmethod
     @exec_log("GUEST协助HOST卡方分箱计算")
@@ -808,32 +797,20 @@ class ChimergeBin:
 
         return nodes_features_info
 
-    def bin_process_merging(self) -> Dict[str, Any]:
-        """bin process merging
+    def bin_process_merging(self, bin_result: Dict[str, Any]) -> Dict[str, Any]:
+        """根据分箱结果进行分箱合并
+
+        Args:
+            bin_result (Dict[str, Any]): 分箱结果
 
         Returns:
-            Dict[str, Any]: {"feature": {"df": df, "nan": nan}}
+            Dict[str, Any]: {"feature": {"success": 1/0, "msg": msg, "result": df}}
         """
-        return self.tool.bins_merging("CHIMERGE_BIN", self.features_dict, self.bin_result, self.con_params["min_samples"], self.cat_params["min_samples"])
+        return self.tool.bins_merging(self.static_bin_type(), self.features_dict, bin_result, self.con_params["min_samples"], self.cat_params["min_samples"])
 
-
-def _decrypt(val: Any,
-             priv: Any) -> int:
-    """解密
-
-    Args:
-        val (Any): 待解密的value
-        priv (Any): 私钥
-
-    Returns:
-        int: 解密后的值
-    """
-    try:
-        de_val = priv.decrypt(val)
-    except Exception:
-        return 0
-    else:
-        return np.round(de_val, 0)
+    @staticmethod
+    def static_bin_type() -> str:
+        return BinType.CHIMERGE_BIN.name
 
 
 def _trans_df(df: pd.DataFrame,
@@ -848,7 +825,7 @@ def _trans_df(df: pd.DataFrame,
         pd.DataFrame: dataframe
     """
     df_ = df.copy()
-    df_.loc[:, "val_1"] = df["val_1"].apply(lambda x: _decrypt(x, priv))
+    df_.loc[:, "val_1"] = df["val_1"].apply(lambda x: decrypting(x, priv))
     df_.loc[:, "val_0"] = df_.loc[:, "num"] - df_.loc[:, "val_1"]
     return df_.loc[:, ["val_1", "val_0"]]
 

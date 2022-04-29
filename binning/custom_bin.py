@@ -6,7 +6,7 @@ import pandas as pd
 from fmpc.utils.LogUtils import get_fmpc_logger
 from joblib import Parallel, delayed
 from wares.common.binning.constants import LOG_PREFIX
-from wares.common.binning.enums import Distribution
+from wares.common.binning.enums import BinType, Distribution
 from wares.common.binning.tool import (Tool, get_cat_feature_bin,
                                        get_con_feature_bin)
 from wares.common.binning.wrap_utils import exec_except, exec_log, exec_time
@@ -98,17 +98,16 @@ class CustomBin:
         Returns:
             Dict[str, Any]: {"feature": {"success": 1, "msg": "", "result": group_result}...}
         """
-        features_dict_ = {}
+        features_dict = {}
         if self.parallel_info.get("parallel"):
             log(f"{LOG_PREFIX}并行自定义分箱计算")
-            features_dict_ = self._features_bin_parallel()
+            features_dict = self._features_bin_parallel()
         else:
             log(f"{LOG_PREFIX}自定义分箱计算")
             df_ = self.df.loc[:, list(self.features_dict.keys()) + [self.label]]
-            _features_bin(self.con_param, self.cat_param, self.features_dict, self.label, df_, features_dict_)
-        # 更新self.bin_result
-        self.bin_result = features_dict_
-        return features_dict_
+            _features_bin(self.con_param, self.cat_param, self.features_dict, self.label, df_, features_dict)
+
+        return features_dict
 
     def _features_bin_parallel(self) -> Dict[str, Any]:
         """分箱计算，并行
@@ -129,19 +128,26 @@ class CustomBin:
                                           for df_parallel in df_parallel_lst)
 
         # 并行结果转换
-        features_dict_ = {}
+        features_dict = {}
         for tmp_ in results:
-            features_dict_.update(tmp_)
+            features_dict.update(tmp_)
 
-        return features_dict_
+        return features_dict
 
-    def bin_process_merging(self) -> Dict[str, Any]:
-        """bin process merging
+    def bin_process_merging(self, bin_result: Dict[str, Any]) -> Dict[str, Any]:
+        """根据分箱结果进行分箱合并
+
+        Args:
+            bin_result (Dict[str, Any]): 分箱结果
 
         Returns:
-            Dict[str, Any]: {"feature": {"df": df, "nan": nan}}
+            Dict[str, Any]: {"feature": {"success": 1/0, "msg": msg, "result": df}}
         """
-        return self.tool.bins_merging("CUSTOM_BIN", self.features_dict, self.bin_result, self.con_min_samples, self.cat_min_samples)
+        return self.tool.bins_merging(self.static_bin_type(), self.features_dict, bin_result, self.con_min_samples, self.cat_min_samples)
+
+    @staticmethod
+    def static_bin_type() -> str:
+        return BinType.CUSTOM_BIN.name
 
 
 @exec_time

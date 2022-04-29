@@ -13,7 +13,7 @@ def exec_time(func):
     def wrap(*args, **kwargs):
         st = time.time()
         result = func(*args, **kwargs)
-        logger.info(f"{LOG_PREFIX}方法{func.__name__}执行时间，{(time.time()-st):.5f}s")
+        logger.info(f"{LOG_PREFIX}方法 {func.__name__} 执行时间，{(time.time()-st):.5f}s")
         return result
     return wrap
 
@@ -29,7 +29,7 @@ def exec_log(mess):
             result = func(*args, **kwargs)
             if log:
                 log(f"{LOG_PREFIX}{mess}结束")
-            logger.info(f"{LOG_PREFIX}方法{func.__name__}执行时间，{(time.time()-st):.5f}s")
+            logger.info(f"{LOG_PREFIX}方法 {func.__name__} 执行时间，{(time.time()-st):.5f}s")
             return result
         return wrap
     return decorator
@@ -42,6 +42,6 @@ def exec_except(func):
             result = func(*args, **kwargs)
         except Exception as ex:
             logger.info(traceback.format_exc())
-            raise RuntimeError(f"{LOG_PREFIX}方法{func.__name__}运行异常，{repr(ex)}")
+            raise RuntimeError(f"{LOG_PREFIX}方法 {func.__name__} 运行异常，{repr(ex)}")
         return result
     return wrap

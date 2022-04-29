@@ -41,6 +41,7 @@ class DistanceBin:
         self.tool = Tool()
         self.preprocess(kwargs)
 
+    @exec_time
     @exec_except
     def preprocess(self, kwargs):
         """preprocess"""

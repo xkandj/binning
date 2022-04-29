@@ -1,8 +1,9 @@
 from typing import Any, Callable, Dict
 
 import pandas as pd
-from fmpc.utils.LogUtils import get_fmpc_logger
 from joblib import Parallel, delayed
+
+from fmpc.utils.LogUtils import get_fmpc_logger
 from wares.common.binning.constants import LOG_PREFIX
 from wares.common.binning.enums import BinType, Distribution
 from wares.common.binning.tool import Tool
