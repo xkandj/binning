@@ -2,8 +2,8 @@ import time
 import traceback
 from functools import wraps
 
-from fmpc.utils.LogUtils import get_fmpc_logger
-from wares.common.binning.constants import LOG_PREFIX
+from .constants import LOG_PREFIX
+from .log_utils import get_fmpc_logger
 
 logger = get_fmpc_logger(__name__)
 

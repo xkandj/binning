@@ -1,17 +1,17 @@
-from math import ceil
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict
 
 import pandas as pd
-from fmpc.utils.EnvUtil import EnvUtil
-from fmpc.utils.LogUtils import get_fmpc_logger
-from wares.common.binning.chimerge_bin import ChimergeBin
-from wares.common.binning.custom_bin import CustomBin
-from wares.common.binning.distance_bin import DistanceBin
-from wares.common.binning.enumerate_bin import EnumerateBin
-from wares.common.binning.enums import BinType
-from wares.common.binning.frequency_bin import FrequencyBin
-from wares.common.binning.tool import Tool
-from wares.common.binning.wrap_utils import exec_except, exec_time
+
+from .chimerge_bin import ChimergeBin
+from .constants import N_CPU
+from .custom_bin import CustomBin
+from .distance_bin import DistanceBin
+from .enumerate_bin import EnumerateBin
+from .enums import BinType
+from .frequency_bin import FrequencyBin
+from .log_utils import get_fmpc_logger
+from .tool import Tool
+from .wrap_utils import exec_except, exec_time
 
 logger = get_fmpc_logger(__name__)
 
@@ -97,7 +97,7 @@ class BinProcessing:
         if self.parallel:
             features = list(self.features_dict.keys())
             n_features = len(features)
-            n_cpu = ceil(EnvUtil.get_available_cpu_count() / 4)
+            n_cpu = N_CPU
             n_split, n_parallel = self.tool.get_n_split_n_parallel(n_cpu, n_features)
             features_lst = self.tool.data_slice(features, n_split)
 

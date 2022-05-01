@@ -4,9 +4,10 @@ from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
-from fmpc.utils.LogUtils import get_fmpc_logger
-from wares.common.binning.constants import NAN_QUO
-from wares.common.binning.enums import BinType, Distribution
+
+from .constants import NAN_QUO
+from .enums import BinType, Distribution
+from .log_utils import get_fmpc_logger
 
 logger = get_fmpc_logger(__name__)
 

@@ -1,13 +1,13 @@
 from typing import Any, Callable, Dict
 
 import pandas as pd
-from fmpc.utils.LogUtils import get_fmpc_logger
 from joblib import Parallel, delayed
-from wares.common.binning.constants import (LOG_PREFIX, MAX_FEATURE_GROUPS,
-                                            NAN_QUO)
-from wares.common.binning.enums import BinType, Distribution
-from wares.common.binning.tool import Tool
-from wares.common.binning.wrap_utils import exec_except, exec_log, exec_time
+
+from .constants import LOG_PREFIX, MAX_FEATURE_GROUPS, NAN_QUO
+from .enums import BinType, Distribution
+from .log_utils import get_fmpc_logger
+from .tool import Tool
+from .wrap_utils import exec_except, exec_log, exec_time
 
 logger = get_fmpc_logger(__name__)
 

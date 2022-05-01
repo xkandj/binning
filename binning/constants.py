@@ -6,3 +6,5 @@ NAN_QUO = '"NaN"'
 MIN_BINS = 2
 # log_prefix
 LOG_PREFIX = "===>>> "
+# cpu num
+N_CPU = 16
