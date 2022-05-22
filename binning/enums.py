@@ -14,3 +14,8 @@ class BinType(Enum):
     ENUMERATE_BIN = "enumerateBin"
     CUSTOM_BIN = "customBin"
     CHIMERGE_BIN = "chimergeBin"
+
+
+@unique
+class CalType(Enum):
+    WOEIV = "woeiv"

@@ -17,22 +17,24 @@ class DistanceBin:
 
     Args:
         label (str): 标签
-        features_info (Dict[str,int]): 特征信息
+        features (Dict[str,int]): 特征集
         df (pd.DataFrame): 分箱数据源
 
         bins (Any): 等距数
         min_samples (int): 最小样本量
         parallel_info (Any): 并行信息
+
+    Local:
         tool (Any): 工具类
     """
 
     def __init__(self,
                  label: str,
-                 features_dict: Dict[str, Any],
+                 features: Dict[str, Any],
                  df: pd.DataFrame,
                  **kwargs):
         self.label = label
-        self.features_dict = features_dict
+        self.features = features
         self.df = df
 
         self.bins = 10
@@ -51,9 +53,9 @@ class DistanceBin:
 
     def _check(self):
         """check"""
-        distribution_val = list(set(self.features_dict.values()))
-        kinds = len(distribution_val)
-        if kinds != 1 or distribution_val[0] != Distribution.CONTINUOUS.value:
+        distribution_lst = list(set(self.features.values()))
+        kinds = len(distribution_lst)
+        if kinds != 1 or distribution_lst[0] != Distribution.CONTINUOUS.value:
             raise ValueError("等距分箱只支持连续型特征")
 
     def _parse_params(self, kwargs):
@@ -66,7 +68,8 @@ class DistanceBin:
             self.parallel_info = kwargs.get("parallel_info")
 
     @exec_log("等距分箱计算")
-    def bin_process(self, log: Callable = None) -> Dict[str, Any]:
+    def bin_process(self,
+                    log: Callable = None) -> Dict[str, Any]:
         """等距分箱计算
 
         Args:
@@ -81,9 +84,8 @@ class DistanceBin:
             features_dict = self._features_bin_parallel()
         else:
             log(f"{LOG_PREFIX}等距分箱计算")
-            df_ = self.df.loc[:, list(self.features_dict.keys())+[self.label]]
+            df_ = self.df.loc[:, list(self.features.keys())+[self.label]]
             _features_bin(self.bins, self.label, df_, features_dict)
-
         return features_dict
 
     def _features_bin_parallel(self) -> Dict[str, Any]:
@@ -106,21 +108,21 @@ class DistanceBin:
 
         # 并行结果转换
         features_dict = {}
-        for tmp_ in results:
-            features_dict.update(tmp_)
-
+        for features_dict_ in results:
+            features_dict.update(features_dict_)
         return features_dict
 
-    def bin_process_merging(self, bin_result: Dict[str, Any]) -> Dict[str, Any]:
+    def bin_process_merging(self,
+                            features_dict: Dict[str, Any]) -> Dict[str, Any]:
         """根据分箱结果进行分箱合并
 
         Args:
-            bin_result (Dict[str, Any]): 分箱结果
+            features_dict (Dict[str, Any]): 分箱结果
 
         Returns:
             Dict[str, Any]: {"feature": {"success": 1/0, "msg": msg, "result": df}}
         """
-        return self.tool.bins_merging(self.static_bin_type(), self.features_dict, bin_result, self.min_samples, None)
+        return self.tool.bins_merging(self.static_bin_type(), self.features, features_dict, self.min_samples, None)
 
     @staticmethod
     def static_bin_type() -> str:
@@ -143,8 +145,8 @@ def _features_bin(bins,
     Returns:
         Dict[str, Any]: 特征字典
     """
-    features = [feature for feature in df_parallel.columns if feature != label]
-    for feature in features:
+    features_ = [feature for feature in df_parallel.columns if feature != label]
+    for feature in features_:
         try:
             df_ = df_parallel.loc[:, [feature, label]]
             df_["x_cat"] = pd.cut(df_[feature], bins=bins, duplicates="drop")
@@ -154,5 +156,4 @@ def _features_bin(bins,
             features_dict[feature] = {"success": 1, "msg": "", "result": result}
         except Exception as ex:
             features_dict[feature] = {"success": 0, "msg": f"该特征等距分箱计算失败，{repr(ex)}"}
-
     return features_dict

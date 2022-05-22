@@ -13,7 +13,6 @@ logger = get_fmpc_logger(__name__)
 
 
 class Tool:
-
     @staticmethod
     def get_n_split_n_parallel(n_cpu, n_features):
         """根据cpu数量和特征量，计算出cpu训练特征量，并行cpu数量
@@ -60,7 +59,7 @@ class Tool:
         """对特征字典进行解密
 
         :param feature_dict: 特征字典
-        :param features: 全部特征
+        :param features: 特征集
         :param priv: 密钥
         :return: 解密后的特征字典
         """
@@ -76,48 +75,58 @@ class Tool:
                 feature_dict_de[x] = {'success': 1, 'msg': '', 'result': df_tmp}
             except Exception as ex:
                 feature_dict_de[x] = {'success': 0, 'msg': f'该特征字段值解密失败，{repr(ex)}'}
-
         return feature_dict_de
 
     @staticmethod
-    def convert_bins_dict(features_dict: Dict[str, Any],
-                          result_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def convert_bins_dict(features: Dict[str, Any],
+                          features_dict: Dict[str, Any],
+                          name: str = None) -> Dict[str, Any]:
         """根据result dict转换成bins dict
 
         Args:
-            features_dict (Dict[str,Any]): 特征字典
-            result_dict (Dict[str, Any]): 分箱结果字典
+            features (Dict[str,Any]): 特征集
+            features_dict (Dict[str, Any]): 特征字典
+            name (str): 数据名称
 
         Returns:
             Dict[str, Any]: bins dict
         """
         bins_dict = {}
-        for feature, data in result_dict.items():
-            distribution = features_dict[feature]
+        for feature, data in features_dict.items():
+            success = data.get("success")
+            if success == 0:
+                bins_dict[feature] = None
+                continue
+
+            distribution = features[feature]
             bins_lst = []
-            df = data.get("result")
+            if name is None:
+                df = data.get("result")
+            else:
+                df = data.get(name)
             df.reset_index(inplace=True)
+
             if distribution == Distribution.CONTINUOUS.value:
                 _get_con_bins_lst(bins_lst, df["x_cat"])
             else:
                 for _, value in df["x_cat"].items():
-                    _update_list_drop_duplicate(bins_lst, value)
+                    val = value.strip('"').replace('","', '\xBA').split('\xBA')
+                    _update_list_drop_duplicate(bins_lst, val)
             bins_dict[feature] = bins_lst
-
         return bins_dict
 
     @staticmethod
     def bins_merging(bin_type: str,
+                     features: Dict[str, Any],
                      features_dict: Dict[str, Any],
-                     bin_result: Dict[str, Any],
                      con_min_sample: Any,
                      cat_min_sample: Any) -> Dict[str, Any]:
         """分箱合并
 
         Args:
             bin_type (str): 分箱类型
-            features_dict (Dict[str, Any]): 特征字典
-            bin_result (Dict[str, Any]): 分箱结果
+            features (Dict[str, Any]): 特征集
+            features_dict (Dict[str, Any]): 分箱结果
             con_min_sample (Any): 连续特征最小样本量
             cat_min_sample (Any): 离散特征最小样本量
 
@@ -125,22 +134,22 @@ class Tool:
             Dict[str, Any]: {"feature": {"success": 1/0, "msg": msg, "result": df}}
         """
         merge_result = {}
-        for feature, distribution in features_dict.items():
-            success = bin_result[feature].get("success")
+        for feature, distribution in features.items():
+            success = features_dict[feature].get("success")
+            msg = features_dict[feature].get("msg")
             if success == 0:
-                continue
-
-            df = bin_result[feature].get("result")
-            if distribution == Distribution.CONTINUOUS.value:
-                df_tmp = _group_con_merge_bin(df, bin_type, con_min_sample)
+                df_tmp = None
             else:
-                df_tmp = _group_cat_merge_bin(df, bin_type, cat_min_sample)
-                df_tmp.reset_index(inplace=True)
+                df = features_dict[feature].get("result")
+                if distribution == Distribution.CONTINUOUS.value:
+                    df_tmp = group_con_merge_bin(df, bin_type, con_min_sample)
+                else:
+                    df_tmp = group_cat_merge_bin(df, bin_type, cat_min_sample)
+                    df_tmp.reset_index(inplace=True)
 
             merge_result[feature] = {"success": success,
-                                     "msg": bin_result[feature].get("msg"),
+                                     "msg": msg,
                                      "result": df_tmp}
-
         return merge_result
 
 
@@ -184,7 +193,7 @@ def _update_list_drop_duplicate(lst: List[Any],
         lst.append(item)
 
 
-def _group_con_merge_bin(df_tmp, bin_type, con_min_sample):
+def group_con_merge_bin(df_tmp, bin_type, con_min_sample):
     """连续特征分箱合并，如相类似的箱数进行合并
 
     :param df_tmp: dataframe
@@ -217,7 +226,6 @@ def _group_con_merge_bin(df_tmp, bin_type, con_min_sample):
     if is_nan:
         df_tmp2 = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
         return df_tmp2
-
     return df_tmp
 
 
@@ -247,7 +255,7 @@ def _con_merge_bin(idx, is_merge, df_tmp):
             df_tmp.drop([idx], axis=0, inplace=True)
 
 
-def _group_cat_merge_bin(df_tmp, bin_type, cat_min_sample):
+def group_cat_merge_bin(df_tmp, bin_type, cat_min_sample):
     """离散特征分箱合并，如相类似的箱数进行合并
 
     :param df_tmp: 数据源
@@ -274,7 +282,6 @@ def _group_cat_merge_bin(df_tmp, bin_type, cat_min_sample):
     if is_nan:
         df_tmp_s = pd.concat([df_tmp, df_tmp_nan], ignore_index=True)
         return df_tmp_s
-
     return df_tmp
 
 
@@ -349,7 +356,6 @@ def _get_cat_enums_lst(x_enums: Dict[Any, Any],
     for key in x_enums:
         if key not in merge_enums:
             bins.append(key)
-
     return bins
 
 

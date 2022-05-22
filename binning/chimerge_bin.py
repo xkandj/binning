@@ -20,12 +20,11 @@ class ChimergeBin:
 
     Args:
         label (str): 标签
-        features_info (Dict[str,int]): 特征信息
+        features (Dict[str,int]): 特征集
         df (pd.DataFrame): 分箱数据源
 
         con_params (Dict[str,Any]): 连续特征分箱参数
         cat_params (Dict[str,Any]): 离散特征分箱参数
-        hex_features_dict (Any): 特征编码的特征字典
         parallel_info (Any): 并行信息
         guest_nid (Any): guest nodeid
         data_transfer (Any): 通信集合
@@ -34,25 +33,29 @@ class ChimergeBin:
                             "job_id": self.job_id,
                             "ctx": self.ctx,
                             "curr_nid": self.curr_nid}
+
+    Local:
+        hex_features_dict (Any): 特征编码的特征字典
         tool (Any): 工具类
     """
 
     def __init__(self,
                  label: str,
-                 features_dict: Dict[str, Any],
+                 features: Dict[str, Any],
                  df: pd.DataFrame,
                  **kwargs):
         self.label = label
-        self.features_dict = features_dict
+        self.features = features
         self.df = df
 
         self.con_params = {"bins": 10, "threshold": 3.84, "min_samples": 100}
         self.cat_params = {"bins": 10, "threshold": 3.84, "min_samples": 100}
 
-        self.hex_features_dict = None
         self.parallel_info = None
         self.guest_nid = None
         self.data_transfer = None
+
+        self.hex_features_dict = None
 
         self.tool = Tool()
         self.preprocess(kwargs)
@@ -97,9 +100,9 @@ class ChimergeBin:
         self.hex_features_dict = self.__convert_hex_features_dict()
 
     def __convert_hex_features_dict(self):
-        """hex features"""
+        """hex features dict"""
         hex_features_dict = {}
-        for feature, distribution in self.features_dict.items():
+        for feature, distribution in self.features.items():
             hex_feature = feature.encode("utf-8").hex()
             feature_chi2_dict = {"feature": feature, "distribution": distribution, "chi2_params": {}, "chi2_values": {}}
             if distribution == Distribution.CONTINUOUS.value:
@@ -108,7 +111,6 @@ class ChimergeBin:
             else:
                 feature_chi2_dict["chi2_params"] = self.cat_params
                 hex_features_dict[hex_feature] = feature_chi2_dict
-
         return hex_features_dict
 
     @exec_log("卡方分箱计算")
@@ -136,9 +138,7 @@ class ChimergeBin:
                 ser_chi2_categorical = _cal_all_chi2(group_dict_categorical)
                 feature_info["chi2_values"]["ser_chi2"] = ser_chi2_categorical
                 sep_vals[feature] = self._get_y_sep_val(feature_info, log)
-
-        features_dict = self._get_feature_dict(sep_vals)
-        return features_dict
+        return self._get_features_dict(sep_vals)
 
     def _get_y_sep_val(self, feature_info, log):
         """获取y方卡方信息sep_vals
@@ -164,7 +164,6 @@ class ChimergeBin:
                 self._cat_feature_compute_chi2(feature_info, log)
                 dfc = feature_info["chi2_values"]["dfc"]
                 sep_val = dfc[feature].tolist()
-
         return sep_val
 
     def _con_feature_compute_chi2(self, feature_info, log):
@@ -183,7 +182,7 @@ class ChimergeBin:
         j = 0
         while True:
             j += 1
-            log(f"==>> 卡方分箱-特征{feature}-第{j}次迭代")
+            log(f"{LOG_PREFIX}卡方分箱-特征{feature}-第{j}次迭代")
             min_chi2, min_chi2_index = self.__get_min_chi2(ser_chi2)
             logger.info(f"===>>(连续)退出循环条件:chi2_threshold:{chi2_threshold},minChi2:{min_chi2}")
             logger.info(f"===>>(连续)退出循环条件:ser_chi2:{ser_chi2},max_box:{max_box}")
@@ -212,9 +211,8 @@ class ChimergeBin:
                 frame_pre = df.iloc[[pos - 1, pos], [1, 2]].reset_index().drop(columns="index")
                 chi2_val2 = _cal_chi2(frame_pre)
                 ser_chi2[key_a] = chi2_val2
-
         feature_info["chi2_values"]["df"] = df
-        log(f'==>> 卡方分箱-特征{feature} 计算完成,迭代次数{j}次')
+        log(f"{LOG_PREFIX}卡方分箱-特征{feature} 计算完成,迭代次数{j}次")
 
     def _cat_feature_compute_chi2(self, feature_info, log):
         """离散特征，计算卡方值
@@ -228,7 +226,7 @@ class ChimergeBin:
         j = 0
         while True:
             j += 1
-            log(f"==>> 卡方分箱-特征{feature}-第{j}次迭代")
+            log(f"{LOG_PREFIX}卡方分箱-特征{feature}-第{j}次迭代")
             if ser_chi2_categorical.count() <= 1:
                 break
             min_chi2_categotical, min_chi2_index_categotical = self.__get_min_chi2(ser_chi2_categorical)
@@ -270,7 +268,7 @@ class ChimergeBin:
             ser_update_categorical = _cal_all_chi2(update_dict_categorical)
             ser_chi2_categorical = pd.concat([ser_chi2_categorical, ser_update_categorical])
         feature_info["chi2_values"]["dfc"] = dfc
-        log(f'==>> 卡方分箱-特征{feature} 计算完成,迭代次数{j}次')
+        log(f"{LOG_PREFIX}卡方分箱-特征{feature} 计算完成,迭代次数{j}次")
 
     def _con_compute_chi2_info(self, feature_info):
         """连续特征卡方分箱的初值
@@ -331,7 +329,6 @@ class ChimergeBin:
         feature_info["chi2_values"]["gr0"] = gr0
         feature_info["chi2_values"]["m"] = m
         feature_info["chi2_values"]["nc"] = nc
-
         return group_dict
 
     def _get_values(self, feature_info):
@@ -390,31 +387,28 @@ class ChimergeBin:
                 self.guest_nid, features_key_delete, self.data_transfer["ctx"], self.data_transfer["job_id"], self.data_transfer["curr_nid"], str(iter_))
         log(f"{LOG_PREFIX}HOST方，完成卡方分箱，共迭代{iter_}次")
         sep_vals = self._get_sep_vals(features_info)
-
-        features_dict = self._get_feature_dict(sep_vals)
-        return features_dict
+        return self._get_features_dict(sep_vals)
 
     def _get_sep_vals(self, features_info):
         """获取卡方分箱值sep_vals
 
         :param features_info: 特征信息
-        :return: sep_vals_
+        :return: sep_vals
         """
-        sep_vals_ = {}
-        for hex_feature, feature_info in features_info.items():
+        sep_vals = {}
+        for _, feature_info in features_info.items():
             feature = feature_info["feature"]
             distribution = feature_info["distribution"]
             if distribution == Distribution.CONTINUOUS.value:
                 df = feature_info["chi2_values"]["df"]
-                sep_vals_[feature] = self._get_sep_val(df['sep'])
+                sep_vals[feature] = self._get_sep_val(df['sep'])
             else:
                 dfc = feature_info["chi2_values"]["dfc"]
                 if dfc[feature].dtype == "object":
-                    sep_vals_[feature] = dfc[feature].tolist()
+                    sep_vals[feature] = dfc[feature].tolist()
                 else:
-                    sep_vals_[feature] = dfc[feature].apply(str).tolist()
-
-        return sep_vals_
+                    sep_vals[feature] = dfc[feature].apply(str).tolist()
+        return sep_vals
 
     def _get_sep_val(self, ser):
         """获取df['sep']新值
@@ -422,14 +416,14 @@ class ChimergeBin:
         :param ser: df['sep']
         :return: [-inf, sep.left, inf]
         """
-        sep_val_ = []
+        sep_val = []
         for i, sep in enumerate(ser):
             if i == 0:
-                sep_val_.append(-np.inf)
+                sep_val.append(-np.inf)
             else:
-                sep_val_.append(sep.left)
-        sep_val_.append(np.inf)
-        return sep_val_
+                sep_val.append(sep.left)
+        sep_val.append(np.inf)
+        return sep_val
 
     def _get_features_update_dict_and_key_delete(self, features_info, feature_finish_dict, min_chi2_index_dict):
         """计算卡方update_dict, key_delete
@@ -454,7 +448,6 @@ class ChimergeBin:
                     update_dict, key_delete = _get_update_dict_and_key_delete(feature_info, min_chi2_index)
                 features_update_dict[hex_feature] = update_dict
                 features_key_delete[hex_feature] = key_delete
-
         return (features_update_dict, features_key_delete)
 
     def _update_dict_and_key_delete_parallel(self, features_info, min_chi2_index_dict, feature_finish_dict):
@@ -469,13 +462,13 @@ class ChimergeBin:
         n_parallel = self.parallel_info["n_parallel"]
         features_lst = self.parallel_info["features_lst"]
         info_parallel_lst = []
-        for features in features_lst:
+        for features_ in features_lst:
             features_info_tmp = {feature.encode(
-                "utf-8").hex(): features_info_copy[feature.encode("utf-8").hex()] for feature in features}
+                "utf-8").hex(): features_info_copy[feature.encode("utf-8").hex()] for feature in features_}
             features_min_chi2_index_tmp = {feature.encode(
-                "utf-8").hex(): min_chi2_index_dict[feature.encode("utf-8").hex()] for feature in features}
+                "utf-8").hex(): min_chi2_index_dict[feature.encode("utf-8").hex()] for feature in features_}
             features_finish_tmp = {feature.encode(
-                "utf-8").hex(): feature_finish_dict[feature.encode("utf-8").hex()] for feature in features}
+                "utf-8").hex(): feature_finish_dict[feature.encode("utf-8").hex()] for feature in features_}
             info_parallel_lst.append({"features_info": features_info_tmp,
                                       "features_min_chi2_index": features_min_chi2_index_tmp,
                                       "features_finish": features_finish_tmp})
@@ -498,7 +491,6 @@ class ChimergeBin:
 
         # 更新features_info
         features_info.update(features_info_new)
-
         return (features_update_dict, features_key_delete)
 
     def _get_features_info_and_send_group_dict(self) -> Dict[str, Any]:
@@ -543,7 +535,8 @@ class ChimergeBin:
             features_group_dict.update(group_dict)
         return (features_info, features_group_dict)
 
-    def _get_feature_dict(self, sep_vals: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_features_dict(self,
+                           sep_vals: Dict[str, Any]) -> Dict[str, Any]:
         """分组，获取特征字典
 
         Args:
@@ -552,16 +545,15 @@ class ChimergeBin:
         Returns:
             Dict[str, Any]: 分箱结果，{"feature": {"success": 1, "msg": "", "result": group_result}...}
         """
-        feature_dict = {}
-        for feature, distribution in self.features_dict.items():
+        features_dict = {}
+        for feature, distribution in self.features.items():
             df = self.df.loc[:, [feature, self.label]]
             param = sep_vals[feature]
             if distribution == Distribution.CONTINUOUS.value:
-                feature_dict[feature] = get_con_feature_bin(df, self.label, feature, param)
+                features_dict[feature] = get_con_feature_bin(df, self.label, feature, param)
             else:
-                feature_dict[feature] = get_cat_feature_bin(df, self.label, feature, param)
-
-        return feature_dict
+                features_dict[feature] = get_cat_feature_bin(df, self.label, feature, param)
+        return features_dict
 
     @staticmethod
     @exec_log("GUEST协助HOST卡方分箱计算")
@@ -694,7 +686,6 @@ class ChimergeBin:
                 data_transfer["listener"], data_transfer["job_id"], flnode_nid, str(iter_))
 
             flnode_info_dict[flnode_nid] = {"update_dict": update_dict, "key_delete": key_delete}
-
         return flnode_info_dict
 
     @staticmethod
@@ -758,7 +749,6 @@ class ChimergeBin:
         # logger.info(f"===>>最小卡方，get_min_chi2, ser:\n{ser}")
         if len(ser) == 0:
             raise ValueError("卡方阈值太大")
-
         return (ser.min(), ser.idxmin())
 
     @staticmethod
@@ -794,19 +784,19 @@ class ChimergeBin:
                 feature_info["chi2_values"]["ser_chi2"] = ser_chi2
                 features_info[hex_feature] = feature_info
             nodes_features_info[flnode_nid] = features_info
-
         return nodes_features_info
 
-    def bin_process_merging(self, bin_result: Dict[str, Any]) -> Dict[str, Any]:
+    def bin_process_merging(self,
+                            features_dict: Dict[str, Any]) -> Dict[str, Any]:
         """根据分箱结果进行分箱合并
 
         Args:
-            bin_result (Dict[str, Any]): 分箱结果
+            features_dict (Dict[str, Any]): 分箱结果
 
         Returns:
             Dict[str, Any]: {"feature": {"success": 1/0, "msg": msg, "result": df}}
         """
-        return self.tool.bins_merging(self.static_bin_type(), self.features_dict, bin_result, self.con_params["min_samples"], self.cat_params["min_samples"])
+        return self.tool.bins_merging(self.static_bin_type(), self.features, features_dict, self.con_params["min_samples"], self.cat_params["min_samples"])
 
     @staticmethod
     def static_bin_type() -> str:
@@ -844,7 +834,6 @@ def _decrypt_data(data: Dict[str, Any],
     decrypted_dict = {}
     for k, v in data.items():
         decrypted_dict[k] = _trans_df(v, priv)
-
     return decrypted_dict
 
 
@@ -891,7 +880,6 @@ def _cal_all_chi2(group_dict: Dict[Any, Any]) -> Any:
         tmp_chi2 = _cal_chi2(v)
         chi2_val.append(tmp_chi2)
         keys.append(k)
-
     return pd.Series(chi2_val, index=keys)
 
 
@@ -974,7 +962,6 @@ def _map_index(df):
     dict_index_map = {}
     for i in range(len(list_ori)):
         dict_index_map[list_ori[i]] = list_new[i]
-
     return dict_index_map
 
 
@@ -985,10 +972,10 @@ def _first_group_dict(df, d):
     :param d: index_dic={原始值：打乱值}
     :return: {}
     """
-    group_dict = dict()
-    for i in range(len(df.index) - 1):  # 每一行和它下面的一行合并，最后一行没有，所以-1
+    group_dict = {}
+    # 每一行和它下面的一行合并，最后一行没有，所以-1
+    for i in range(len(df.index) - 1):
         group_dict[d[i]] = df.loc[i:i + 1, ["num", "val_1"]].reset_index().drop(columns="index")
-
     return group_dict
 
 
@@ -1017,7 +1004,6 @@ def _get_con_group_dict(df, label, feature_info):
     feature_info["chi2_values"]["df"] = df
     feature_info["chi2_values"]["dict_index_map"] = dict_index_map
     feature_info["chi2_values"]["n"] = n
-
     return group_dict
 
 
@@ -1050,7 +1036,6 @@ def _get_cat_group_dict(df, label, feature_info):
     feature_info["chi2_values"]["nc"] = nc
     feature_info["chi2_values"]["gr"] = gr
     feature_info["chi2_values"]["m"] = m
-
     return group_dict
 
 
@@ -1080,8 +1065,8 @@ def _get_features_info_parallel(label, features_dict, df_parallel, features_info
     :param features_group_dict: 特征分箱字典
     :return: (features_info, features_group_dict)
     """
-    features = [x for x in df_parallel.columns if x != label]
-    for feature in features:
+    features_ = [x for x in df_parallel.columns if x != label]
+    for feature in features_:
         hex_feature = feature.encode("utf-8").hex()
         df = df_parallel[[feature, label]]
         feature_info = features_dict[hex_feature]
@@ -1090,7 +1075,6 @@ def _get_features_info_parallel(label, features_dict, df_parallel, features_info
         # update dict
         features_group_dict[hex_feature] = group_dict
         features_info[hex_feature] = feature_info
-
     return (features_info, features_group_dict)
 
 
@@ -1240,7 +1224,6 @@ def _get_update_dict_and_key_delete(feature_info, min_chi2_index):
         feature_info["chi2_values"]["nc"] = nc
         feature_info["chi2_values"]["gr"] = gr
         feature_info["chi2_values"]["m"] = m
-
     return (update_dict, key_delete)
 
 
@@ -1269,5 +1252,4 @@ def _get_dict_and_key_delete_parallel(features_info_parallel, features_info_dict
         features_info_dict[hex_feature] = feature_info
         features_update_dict[hex_feature] = update_dict
         features_key_delete[hex_feature] = key_delete
-
     return (features_info_dict, features_update_dict, features_key_delete)
